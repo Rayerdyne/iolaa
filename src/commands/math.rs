@@ -46,7 +46,7 @@ pub async fn compute(ctx: &Context, msg: &Message, args: Args) -> CommandResult 
         sum += product;
     }
 
-    msg.channel_id.say(&ctx.http, format!("It makes: µ`{}`", sum)).await?;
+    msg.channel_id.say(&ctx.http, format!("It makes: `{}`", sum)).await?;
 
     Ok(())
 }
