@@ -64,7 +64,7 @@ struct Math;
 struct UrlSet;
 
 #[group]
-#[commands(play, stop)]
+#[commands(join, cache, play, stop)]
 struct Player;
 
 #[tokio::main]
