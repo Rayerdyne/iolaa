@@ -1,79 +1,255 @@
-use std::collections::HashMap;
-use std::fmt;
+use serenity::{
+    prelude::*,
+    model::prelude::*,
+    framework::standard::{
+        Args, CommandResult, macros::command
+    },
+    utils::MessageBuilder,
+};
 use std::str::FromStr;
 use std::fs::File;
-use std::io::{Read, Error, ErrorKind};
+use std::io::{Read, Write, Error as IOError, ErrorKind};
+use std::sync::Mutex;
+use lazy_static::lazy_static;
 
-struct FolderSet {
-    folders: HashMap<String, HashMap<String, String>>
+use super::utils::FolderSet;
+
+const DEF_FOLDER_NAME: &str = "default";
+const DATA_FILE: &str = "data/urls.txt";
+
+// Folder: `folder_name`
+// Name:   **name**
+// Url:    __url__
+
+// What is the best way to memorize some information from one command to another ?
+// For example, I want to to something like:
+// `set 3.14159` 
+// `get` then the bot answers: `3.14159`
+// Is `lazy_static` the thing to use or 
+
+lazy_static! {
+    static ref URLS: Mutex<FolderSet> = Mutex::new({
+        match load_urls(DATA_FILE) {
+            Ok(fs) => fs,
+            Err(_) => FolderSet::new(),
+        }
+    });
+
+    static ref CUR_DIR: Mutex<String> = Mutex::new(String::from(DEF_FOLDER_NAME));
 }
 
-impl FolderSet {
-    fn new() -> FolderSet {
-        FolderSet {
-            folders: HashMap::new()
-        }
-    }
 
-    fn add_folder(&mut self, name: &str) {
-        let f = HashMap::new();
-        self.folders.insert(String::from(name), f);
-    }
-
-    fn set_in_folder(&mut self, folder: &str, name: &str, value: &str) -> Option<()> {
-        let f = self.folders.get_mut(folder)?;
-        f.insert(String::from(name), String::from(value));
-        Some(())
-    }
+#[command]
+pub async fn whereis(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
+    let ans = MessageBuilder::new()
+        .push("The current directory is: ")
+        .push_mono(CUR_DIR.lock().unwrap().as_str())
+        .push(".").build();
+    msg.channel_id.say(&ctx.http, ans).await?;
+    Ok(())
 }
 
-impl fmt::Display for FolderSet {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut res = String::new();
-        for (folder_name, folder) in self.folders.clone() {
-            res.push_str(format!("\"{}\": {{\n", folder_name).as_str());
-            for (name, url) in folder {
-                res.push_str(format!("\t\"{}\": \"{}\"\n", name, url).as_str());
-            }
-            res.push_str("},\n");
-        }
-
-        write!(f, "{}", res)
+#[command]
+pub async fn cd(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let mut target = args.single::<String>()?;
+    if target == ".." {
+        target = String::from(DEF_FOLDER_NAME);
     }
+    if !URLS.lock().unwrap().contains_folder(target.as_str()) {
+        let ans = MessageBuilder::new()
+            .push("😮 There is no ")    .push_mono(target)
+            .push(" directory.")        .build();
+        msg.channel_id.say(&ctx.http, ans).await?;
+    }
+    else {
+        CUR_DIR.lock().unwrap().replace_range(.., target.as_str());
+        let ans = MessageBuilder::new()
+            .push("Moved to ")          .push_mono(target)
+            .push(" directory 📂!")     .build();
+        msg.channel_id.say(&ctx.http, ans).await?;
+    }
+    Ok(())
 }
 
-impl FromStr for FolderSet {
-    type Err = String;
+#[command]
+pub async fn mkdir(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let folder = match args.single::<String>() {
+        Ok(s) => s,
+        Err(_) => String::new()
+    };
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut fs = FolderSet::new();
-        let folders : Vec<&str> = s.split(',').collect();
-        for k in 0..folders.len()-1 {
-            let folder = folders[k];
-            let lines : Vec<&str> = folder.trim().split('\n').collect();
-            let l0_parts : Vec<&str> = lines[0].split('"')
-                                               .filter(|s| !s.is_empty())
-                                               .collect();
-            let folder_name = l0_parts[0].trim();
-            fs.add_folder(String::from(folder_name).as_str());
-
-            for i in 1..lines.len()-1 {
-                println!("line of {}: {}", folder_name, lines[i]);
-                let line_parts : Vec<&str> = lines[i].split('"').collect();
-                let name = line_parts[1].trim();
-                let url = line_parts[3].trim();
-                fs.set_in_folder( String::from(folder_name).as_str(), 
-                                  String::from(name).as_str(),
-                                  String::from(url).as_str());
-            }
-        }
-
-        Ok(fs)
+    if folder.is_empty() {
+        msg.channel_id.say(&ctx.http, "🙊 Must provide the a folder'sname !").await?;
+    } else {
+        URLS.lock().unwrap().add_folder(folder.as_str());
+        let ans = MessageBuilder::new()
+            .push("👉Created new ")     .push_mono(folder)
+            .push(" directory!")        .build();
+        msg.channel_id.say(&ctx.http, ans).await?;
     }
+
+    Ok(())
+}
+
+#[command]
+pub async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    loop {
+        let name = match args.single::<String>() {
+            Ok(s) => s,
+            Err(_) => break,
+        };
+        let url = match args.single::<String>() {
+            Ok(s) => s,
+            Err(_) => break,
+        };
+
+        // let folder = CUR_DIR.lock().unwrap().clone().as_str();
+        URLS.lock().unwrap().set_in_folder(
+            CUR_DIR.lock().unwrap().as_str(), name.as_str(), url.as_str());
+        
+        let ans = MessageBuilder::new()
+            .push("Added ")           .push_bold(name.as_str())
+            .push(" entry in ")       .push_mono(CUR_DIR.lock().unwrap().as_str())
+            .push(" directory 👌!")   .build();
+        msg.channel_id.say(&ctx.http, ans).await?;
+    }
+    Ok(())
+}
+
+#[command]
+pub async fn get(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    loop {
+        let name = match args.single::<String>() {
+            Ok(s) => s,
+            Err(_) => break,
+        };
+
+        let entry = match URLS.lock().unwrap().get(CUR_DIR.lock().unwrap().as_str(), name.as_str()) {
+            Some(s) => s.clone(),
+            None => String::new(),
+        };
+
+        if entry.is_empty() {
+            let ans = MessageBuilder::new()
+                .push("Did not found an entry for ")    .push_bold(name)
+                .push(" in folder ")                    .push_mono(CUR_DIR.lock().unwrap())
+                .push(" 😮.")                            .build();
+            msg.channel_id.say(&ctx.http, ans).await?;
+        }
+        else {
+            let ans = MessageBuilder::new()
+                .push_bold(name)                        .push(" (in folder ")
+                .push_mono(CUR_DIR.lock().unwrap())     .push(") is ")
+                .push_underline(entry)                  .push(".")
+                .build();
+            msg.channel_id.say(&ctx.http, ans).await?;
+        }
+    }
+    Ok(())
+}
+
+#[command]
+pub async fn rm(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    loop {
+        let name = match args.single::<String>() {
+            Ok(s) => s,
+            Err(_) => break,
+        };
+
+        let entry = match URLS.lock().unwrap().get(CUR_DIR.lock().unwrap().as_str(), name.as_str()) {
+            Some(s) => s.clone(),
+            None => String::new(),
+        };
+
+        if entry.is_empty() {
+            let ans = MessageBuilder::new()
+                .push("Did not found an entry for ")    .push_bold(name)
+                .push(" in folder ")                    .push_mono(CUR_DIR.lock().unwrap())
+                .push(" 😮.")                            .build();
+            msg.channel_id.say(&ctx.http, ans).await?;
+        }
+        else {
+            let res = match URLS.lock().unwrap().remove_entry(CUR_DIR.lock().unwrap().as_str(), name.as_str()) {
+                Some(_) => "Oké !",
+                None => "Not oké :-<",
+            };
+            println!("Remove entry: {}", res);
+            let ans = MessageBuilder::new()
+                .push_bold(name)                        .push(" has been removed from ")
+                .push_mono(CUR_DIR.lock().unwrap())     .push(" folder ✅.")
+                .build();
+            msg.channel_id.say(&ctx.http, ans).await?;
+        }
+    }
+    Ok(())
+}
+
+#[command]
+pub async fn rmdir(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let folder = match args.single::<String>() {
+        Ok(s) => s,
+        Err(_) => String::new()
+    };
+
+    if folder.is_empty() {
+        msg.channel_id.say(&ctx.http, "🙊 Must provide a folder's name !").await?;
+    } else {
+        URLS.lock().unwrap().remove_folder(folder.as_str());
+        let ans = MessageBuilder::new()
+            .push("👉Created new ")     .push_mono(folder)
+            .push(" directory!")        .build();
+        msg.channel_id.say(&ctx.http, ans).await?;
+    }
+    Ok(())
+}
+
+#[command]
+pub async fn ls(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    
+    let folder = if args.len() > 0 {
+       args.single::<String>()?    
+    } else {
+        CUR_DIR.lock().unwrap().clone()
+    };
+
+    let entries = URLS.lock().unwrap().list_folder(folder.as_str());
+    let mut ans = MessageBuilder::new();
+    ans.push("Found following entries in folder ")
+       .push_mono(folder)   .push(": \n");
+    for entry in entries {
+        ans.push("- ").push_bold(entry.as_str()).push(",\n");
+    }
+
+    msg.channel_id.say(&ctx.http, ans.build()).await?;
+    Ok(())
+}
+
+#[command]
+pub async fn save(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
+
+    msg.channel_id.say(&ctx.http, format!("Before: {}", URLS.lock().unwrap()).as_str()).await?;
+    #[allow(unused_must_use)]
+    match save_raw(DATA_FILE, format!("{}", URLS.lock().unwrap()).as_bytes()) {
+        Ok(()) => {
+            msg.channel_id.say(&ctx.http, "Successfully saved 😘!").await?;
+        },
+        Err(_) => { 
+            msg.channel_id.say(&ctx.http, "Could not write file, some error occured 😕.").await?;
+            ()
+        }
+    };
+    msg.channel_id.say(&ctx.http, format!("After: {}", URLS.lock().unwrap()).as_str()).await?;
+    Ok(())
+}
+
+fn save_raw(filename: &str, data: &[u8]) -> Result<(), IOError> {
+    let mut file = File::create(filename)?;
+    file.write_all(data)?;
+    Ok(())
 }
 
 #[allow(dead_code)]
-fn load_urls(filename: &str) -> Result<FolderSet, Error> {
+fn load_urls(filename: &str) -> Result<FolderSet, IOError> {
     let mut file = File::open(filename)?;
     let mut data = String::new();
     if let Err(e) = file.read_to_string(&mut data) {
@@ -82,7 +258,7 @@ fn load_urls(filename: &str) -> Result<FolderSet, Error> {
     
     match FolderSet::from_str(&mut data) {
         Ok(fs) => Ok(fs),
-        Err(s) => Err(Error::new(ErrorKind::Other, s))
+        Err(s) => Err(IOError::new(ErrorKind::Other, s))
     }
 }
 
@@ -114,6 +290,22 @@ fn test_from_str_folder() {
     }
 }
 
+#[test]
+fn test_load() {
+    let fs = match load_urls("data/urls.txt") {
+        Ok(f) => f,
+        Err(_) => nul(),
+    };
+    println!("'{}'", fs);
+}
+
+#[allow(dead_code)]
+fn nul() -> FolderSet {
+    println!("nul.");
+    FolderSet::new()
+}
+
+#[allow(dead_code)]
 fn caca(f: FolderSet) {
     println!("caca-> \n{} ", f);
 }

@@ -26,6 +26,7 @@ use tracing_subscriber::{
 use commands::{
     math::*,
     meta::*,
+    urls::*,
 };
 
 struct ShardManagerContainer;
@@ -50,6 +51,10 @@ impl EventHandler for Handler {
 #[group]
 #[commands(multiply, add, compute, ping, quit, hello)]
 struct General;
+
+#[group]
+#[commands(set, get, whereis, cd, mkdir, rmdir, rm, ls, save)]
+struct UrlSet;
 
 #[tokio::main]
 async fn main() {
@@ -89,7 +94,8 @@ async fn main() {
         .configure(|c| c
                    .owners(owners)
                    .prefix("&"))
-        .group(&GENERAL_GROUP);
+        .group(&GENERAL_GROUP)
+        .group(&URLSET_GROUP);
 
     let mut client = Client::builder(&token)
         .framework(framework)
