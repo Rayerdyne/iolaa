@@ -103,9 +103,14 @@ pub async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult 
             Err(_) => break,
         };
 
+        if name.contains("_") {
+            msg.channel_id.say(&ctx.http, "Name cannot contain `'_'`.").await?;
+            return Ok(())
+        }
+
         // let folder = CUR_DIR.lock().unwrap().clone().as_str();
         URLS.lock().unwrap().set_in_folder(
-            CUR_DIR.lock().unwrap().as_str(), name.as_str(), url.as_str());
+            CUR_DIR.lock().unwrap().as_str(), &name, &url);
         
         let ans = MessageBuilder::new()
             .push("Added ")           .push_bold(name.as_str())
@@ -124,7 +129,7 @@ pub async fn get(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult 
             Err(_) => break,
         };
 
-        let entry = match URLS.lock().unwrap().get(CUR_DIR.lock().unwrap().as_str(), name.as_str()) {
+        let entry = match URLS.lock().unwrap().get(CUR_DIR.lock().unwrap().as_str(), &name) {
             Some(s) => s.clone(),
             None => String::new(),
         };
@@ -217,7 +222,7 @@ pub async fn ls(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     ans.push("Found following entries in folder ")
        .push_mono(folder)   .push(": \n");
     for entry in entries {
-        ans.push("- ").push_bold(entry.as_str()).push(",\n");
+        ans.push_mono("- ").push_bold(entry.as_str()).push(",\n");
     }
 
     msg.channel_id.say(&ctx.http, ans.build()).await?;

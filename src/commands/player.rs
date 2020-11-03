@@ -4,6 +4,7 @@ use serenity::{
     framework::standard::{
         Args, CommandResult, macros::command
     },
+    utils::MessageBuilder,
 };
 
 // use songbird::{
@@ -30,7 +31,7 @@ pub async fn join(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
     let connect_to = match channel_id {
         Some(channel) => channel,
         None => {
-            msg.reply(ctx, "😑 You must be in a voice channel!").await?;
+            msg.channel_id.say(&ctx.http, "😑 You must be in a voice channel!").await?;
             return Ok(());
         }
     };
@@ -40,6 +41,19 @@ pub async fn join(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
 
     let _handler = manager.join(guild_id, connect_to).await;
 
+    Ok(())
+}
+
+#[command]
+#[only_in(guilds)]
+pub async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
+    let guild: Guild = msg.guild(&ctx.cache).await.unwrap();
+    let guild_id = guild.id;
+
+    let manager = songbird::get(ctx).await
+        .expect("Songbird Voice client placed in at initialisation.").clone();
+
+    manager.leave(guild_id).await?;
     Ok(())
 }
 
@@ -85,9 +99,19 @@ pub async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
             },
         };
 
-        handler.play_source(source);
+        let audio_name = match &source.metadata.title {
+            Some(title) => title.clone(),
+            None        => String::from("Unknown"),
+        };
+        println!("Metadata: ({:?})", &source.metadata);
+        println!("reader: ({:?})", &source.reader);
 
-        msg.channel_id.say(&ctx.http, "Playing song").await?;
+        let _track_handle = handler.play_source(source);
+
+        let ans = MessageBuilder::new()
+            .push("Playing: ")      .push_underline(&audio_name)
+            .push("🎵")             .build();
+        msg.channel_id.say(&ctx.http, ans).await?;
     } else {
         msg.channel_id.say(&ctx.http, "😑 I'm not in a voice channel!").await?;
     }

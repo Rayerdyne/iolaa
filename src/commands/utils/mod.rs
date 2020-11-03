@@ -77,11 +77,12 @@ impl fmt::Display for FolderSet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut res = String::new();
         for folder_name in self.folders.clone() {
-            res.push_str(format!("\"{}\": {{\n", folder_name).as_str());
+            res.push_str(&format!("\"{}\": {{\n", folder_name));
 
             for (name, url) in &self.urls {
-                if name.starts_with(folder_name.as_str()) {
-                    res.push_str(format!("\t\"{}\": \"{}\"\n", name, url).as_str());
+                if name.starts_with(&folder_name) {
+                    let short_name = name.split("_").nth(1).unwrap();
+                    res.push_str(&format!("\t\"{}\": \"{}\"\n", short_name, url));
                 }
             }
             res.push_str("},\n");
@@ -104,16 +105,16 @@ impl FromStr for FolderSet {
                                                .filter(|s| !s.is_empty())
                                                .collect();
             let folder_name = l0_parts[0].trim();
-            fs.add_folder(String::from(folder_name).as_str());
+            fs.add_folder(&String::from(folder_name));
 
             for i in 1..lines.len()-1 {
                 println!("line of {}: {}", folder_name, lines[i]);
                 let line_parts : Vec<&str> = lines[i].split('"').collect();
                 let name = line_parts[1].trim();
                 let url = line_parts[3].trim();
-                fs.set_in_folder( String::from(folder_name).as_str(), 
-                                  String::from(name).as_str(),
-                                  String::from(url).as_str());
+                fs.set_in_folder( &String::from(folder_name), 
+                                  &String::from(name),
+                                  &String::from(url));
             }
         }
 
