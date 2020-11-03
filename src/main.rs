@@ -17,6 +17,8 @@ use serenity::{
     prelude::*,
 };
 
+use songbird::SerenityInit;
+
 use tracing::{error, info};
 use tracing_subscriber::{
     FmtSubscriber,
@@ -27,6 +29,7 @@ use commands::{
     math::*,
     meta::*,
     urls::*,
+    player::*,
 };
 
 struct ShardManagerContainer;
@@ -49,12 +52,20 @@ impl EventHandler for Handler {
 }
 
 #[group]
-#[commands(multiply, add, compute, ping, quit, hello)]
+#[commands(ping, quit, hello)]
 struct General;
+
+#[group]
+#[commands(multiply, add, compute)]
+struct Math;
 
 #[group]
 #[commands(set, get, whereis, cd, mkdir, rmdir, rm, ls, save)]
 struct UrlSet;
+
+#[group]
+#[commands(play, stop)]
+struct Player;
 
 #[tokio::main]
 async fn main() {
@@ -95,11 +106,14 @@ async fn main() {
                    .owners(owners)
                    .prefix("&"))
         .group(&GENERAL_GROUP)
+        .group(&MATH_GROUP)
+        .group(&PLAYER_GROUP)
         .group(&URLSET_GROUP);
 
     let mut client = Client::builder(&token)
         .framework(framework)
         .event_handler(Handler)
+        .register_songbird()
         .await
         .expect("Err creating client");
 

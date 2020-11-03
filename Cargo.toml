@@ -18,9 +18,15 @@ version = "0.2"
 features = ["macros", "signal"]
 
 [dependencies.serenity]
-git = "https://github.com/serenity-rs/serenity.git"
-branch = "v0.9.x"
+git = "https://github.com/serenity-rs/serenity/"
+branch = "next"
 # version = "0.9"
 default-features = false
-features = ["client", "cache", "standard_framework", "default_native_tls"]
+features = ["client", "standard_framework", "voice", "rustls_backend"]
 # features = ["framework", "standard_framework"]
+
+[dependencies.songbird]
+git = "https://github.com/serenity-rs/serenity"
+branch = "next"
+# default-features = false
+# features = ["serenity-native", "gateway"]

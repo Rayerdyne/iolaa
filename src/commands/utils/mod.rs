@@ -56,7 +56,7 @@ impl FolderSet {
     /// Removes a folder and all its entries.
     #[allow(dead_code)]
     pub fn remove_folder(&mut self, folder: &str) -> bool {
-        self.urls.retain(|k, _v| !k.as_str().starts_with(folder));
+        self.urls.retain(|k, _v| !k.starts_with(folder));
         self.folders.remove(&String::from(folder))
     }
 
@@ -65,7 +65,7 @@ impl FolderSet {
     pub fn list_folder(&self, folder: &str) -> HashSet<String> {
         let mut res: HashSet<String> = HashSet::new();
         for (k, _v) in self.urls.clone() {
-            if k.as_str().starts_with(folder) {
+            if k.starts_with(folder) {
                 res.insert(String::from(k.split("_").nth(1).unwrap()));
             }
         }
@@ -80,7 +80,7 @@ impl fmt::Display for FolderSet {
             res.push_str(format!("\"{}\": {{\n", folder_name).as_str());
 
             for (name, url) in &self.urls {
-                if name.as_str().starts_with(folder_name.as_str()) {
+                if name.starts_with(folder_name.as_str()) {
                     res.push_str(format!("\t\"{}\": \"{}\"\n", name, url).as_str());
                 }
             }
