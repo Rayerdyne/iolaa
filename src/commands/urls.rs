@@ -1,16 +1,16 @@
+use std::str::FromStr;
+use std::fs::File;
+use std::io::{Read, Write, Error as IOError, ErrorKind};
+use std::sync::Arc;
+
 use serenity::{
-    prelude::*,
-    model::prelude::*,
+    prelude::{TypeMapKey, RwLock, Context},
+    model::prelude::Message,
     framework::standard::{
         Args, CommandResult, macros::command
     },
     utils::MessageBuilder,
 };
-use std::str::FromStr;
-use std::fs::File;
-use std::io::{Read, Write, Error as IOError, ErrorKind};
-use std::sync::{Arc, Mutex};
-use lazy_static::lazy_static;
 
 use super::utils::FolderSet;
 
@@ -27,23 +27,28 @@ const DATA_FILE: &str = "data/urls.txt";
 // `get` then the bot answers: `3.14159`
 // Is `lazy_static` the thing to use or 
 
-lazy_static! {
-    static ref URLS: Arc<Mutex<FolderSet>> = Arc::new(Mutex::new({
-        match load_urls(DATA_FILE) {
-            Ok(fs) => fs,
-            Err(_) => FolderSet::new(),
-        }
-    }));
+struct UrlsFolder;
+struct CurDir;
 
-    static ref CUR_DIR: Mutex<String> = Mutex::new(String::from(DEF_FOLDER_NAME));
+impl TypeMapKey for UrlsFolder {
+    type Value = Arc<RwLock<FolderSet>>;
 }
-
+impl TypeMapKey for CurDir {
+    type Value = Arc<RwLock<String>>;
+}
 
 #[command]
 pub async fn whereis(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
+    let curdir_lock = {
+        let data_read = ctx.data.read().await;
+        data_read.get::<CurDir>().expect("Expected CurDir in TypeMap ;(").clone()
+    };
+
+    let cur_dir = curdir_lock.read().await;
+
     let ans = MessageBuilder::new()
         .push("The current directory is: ")
-        .push_mono(CUR_DIR.lock().unwrap().as_str())
+        .push_mono(cur_dir.clone())
         .push(".").build();
     msg.channel_id.say(&ctx.http, ans).await?;
     Ok(())
@@ -51,18 +56,28 @@ pub async fn whereis(ctx: &Context, msg: &Message, _args: Args) -> CommandResult
 
 #[command]
 pub async fn cd(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let (curdir_lock, uf_lock) = {
+        let data_read = ctx.data.read().await;
+        (data_read.get::<CurDir>().expect("Expected CurDir in TypeMap ;(").clone(),
+         data_read.get::<UrlsFolder>().expect("Expected UrlsFilder in TypeMap ;(").clone())
+    };
+
+    let mut cur_dir = curdir_lock.write().await;
+    let urls = uf_lock.read().await;
+
     let mut target = args.single::<String>()?;
     if target == ".." {
         target = String::from(DEF_FOLDER_NAME);
     }
-    if !URLS.lock().unwrap().contains_folder(target.as_str()) {
+
+    if !urls.contains_folder(&target) {
         let ans = MessageBuilder::new()
             .push("😮 There is no ")    .push_mono(target)
             .push(" directory.")        .build();
         msg.channel_id.say(&ctx.http, ans).await?;
     }
     else {
-        CUR_DIR.lock().unwrap().replace_range(.., target.as_str());
+        cur_dir.replace_range(.., &target);
         let ans = MessageBuilder::new()
             .push("Moved to ")          .push_mono(target)
             .push(" directory 📂!")     .build();
@@ -73,6 +88,13 @@ pub async fn cd(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
 #[command]
 pub async fn mkdir(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let uf_lock = {
+        let data_read = ctx.data.read().await;
+        data_read.get::<UrlsFolder>().expect("Expected UrlsFilder in TypeMap ;(").clone()
+    };
+
+    let mut urls = uf_lock.write().await;
+
     let folder = match args.single::<String>() {
         Ok(s) => s,
         Err(_) => String::new()
@@ -81,7 +103,7 @@ pub async fn mkdir(ctx: &Context, msg: &Message, mut args: Args) -> CommandResul
     if folder.is_empty() {
         msg.channel_id.say(&ctx.http, "🙊 Must provide the a folder'sname !").await?;
     } else {
-        URLS.lock().unwrap().add_folder(folder.as_str());
+        urls.add_folder(folder.as_str());
         let ans = MessageBuilder::new()
             .push("👉Created new ")     .push_mono(folder)
             .push(" directory!")        .build();
@@ -93,6 +115,15 @@ pub async fn mkdir(ctx: &Context, msg: &Message, mut args: Args) -> CommandResul
 
 #[command]
 pub async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let (curdir_lock, uf_lock) = {
+        let data_read = ctx.data.read().await;
+        (data_read.get::<CurDir>().expect("Expected CurDir in TypeMap ;(").clone(),
+         data_read.get::<UrlsFolder>().expect("Expected UrlsFilder in TypeMap ;(").clone())
+    };
+
+    let cur_dir = curdir_lock.read().await;
+    let mut urls = uf_lock.write().await;
+
     loop {
         let name = match args.single::<String>() {
             Ok(s) => s,
@@ -109,12 +140,11 @@ pub async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult 
         }
 
         // let folder = CUR_DIR.lock().unwrap().clone().as_str();
-        URLS.lock().unwrap().set_in_folder(
-            CUR_DIR.lock().unwrap().as_str(), &name, &url);
+        urls.set_in_folder(&cur_dir, &name, &url);
         
         let ans = MessageBuilder::new()
             .push("Added ")           .push_bold(name.as_str())
-            .push(" entry in ")       .push_mono(CUR_DIR.lock().unwrap().as_str())
+            .push(" entry in ")       .push_mono(cur_dir.as_str())
             .push(" directory 👌!")   .build();
         msg.channel_id.say(&ctx.http, ans).await?;
     }
@@ -123,13 +153,22 @@ pub async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult 
 
 #[command]
 pub async fn get(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let (curdir_lock, uf_lock) = {
+        let data_read = ctx.data.read().await;
+        (data_read.get::<CurDir>().expect("Expected CurDir in TypeMap ;(").clone(),
+         data_read.get::<UrlsFolder>().expect("Expected UrlsFilder in TypeMap ;(").clone())
+    };
+
+    let cur_dir = curdir_lock.read().await;
+    let urls = uf_lock.read().await;
+
     loop {
         let name = match args.single::<String>() {
             Ok(s) => s,
             Err(_) => break,
         };
 
-        let entry = match URLS.lock().unwrap().get(CUR_DIR.lock().unwrap().as_str(), &name) {
+        let entry = match urls.get(&cur_dir, &name) {
             Some(s) => s.clone(),
             None => String::new(),
         };
@@ -137,14 +176,14 @@ pub async fn get(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult 
         if entry.is_empty() {
             let ans = MessageBuilder::new()
                 .push("Did not found an entry for ")    .push_bold(name)
-                .push(" in folder ")                    .push_mono(CUR_DIR.lock().unwrap())
+                .push(" in folder ")                    .push_mono(cur_dir.as_str())
                 .push(" 😮.")                            .build();
             msg.channel_id.say(&ctx.http, ans).await?;
         }
         else {
             let ans = MessageBuilder::new()
                 .push_bold(name)                        .push(" (in folder ")
-                .push_mono(CUR_DIR.lock().unwrap())     .push(") is ")
+                .push_mono(cur_dir.as_str())            .push(") is ")
                 .push_underline(entry)                  .push(".")
                 .build();
             msg.channel_id.say(&ctx.http, ans).await?;
@@ -155,13 +194,22 @@ pub async fn get(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult 
 
 #[command]
 pub async fn rm(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let (curdir_lock, uf_lock) = {
+        let data_read = ctx.data.read().await;
+        (data_read.get::<CurDir>().expect("Expected CurDir in TypeMap ;(").clone(),
+         data_read.get::<UrlsFolder>().expect("Expected UrlsFilder in TypeMap ;(").clone())
+    };
+
+    let cur_dir = curdir_lock.read().await;
+    let mut urls = uf_lock.write().await;
+
     loop {
         let name = match args.single::<String>() {
             Ok(s) => s,
             Err(_) => break,
         };
 
-        let entry = match URLS.lock().unwrap().get(CUR_DIR.lock().unwrap().as_str(), name.as_str()) {
+        let entry = match urls.get(&cur_dir, &name) {
             Some(s) => s.clone(),
             None => String::new(),
         };
@@ -169,19 +217,19 @@ pub async fn rm(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         if entry.is_empty() {
             let ans = MessageBuilder::new()
                 .push("Did not found an entry for ")    .push_bold(name)
-                .push(" in folder ")                    .push_mono(CUR_DIR.lock().unwrap())
-                .push(" 😮.")                            .build();
+                .push(" in folder ")                    .push_mono(cur_dir.as_str())
+                .push(" 😮.")                           .build();
             msg.channel_id.say(&ctx.http, ans).await?;
         }
         else {
-            let res = match URLS.lock().unwrap().remove_entry(CUR_DIR.lock().unwrap().as_str(), name.as_str()) {
+            let res = match urls.remove_entry(&cur_dir, &name) {
                 Some(_) => "Oké !",
                 None => "Not oké :-<",
             };
             println!("Remove entry: {}", res);
             let ans = MessageBuilder::new()
                 .push_bold(name)                        .push(" has been removed from ")
-                .push_mono(CUR_DIR.lock().unwrap())     .push(" folder ✅.")
+                .push_mono(cur_dir.as_str())            .push(" folder ✅.")
                 .build();
             msg.channel_id.say(&ctx.http, ans).await?;
         }
@@ -191,6 +239,13 @@ pub async fn rm(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
 #[command]
 pub async fn rmdir(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let uf_lock = {
+        let data_read = ctx.data.read().await;
+        data_read.get::<UrlsFolder>().expect("Expected UrlsFilder in TypeMap ;(").clone()
+    };
+
+    let mut urls = uf_lock.write().await;
+
     let folder = match args.single::<String>() {
         Ok(s) => s,
         Err(_) => String::new()
@@ -199,7 +254,7 @@ pub async fn rmdir(ctx: &Context, msg: &Message, mut args: Args) -> CommandResul
     if folder.is_empty() {
         msg.channel_id.say(&ctx.http, "🙊 Must provide a folder's name !").await?;
     } else {
-        URLS.lock().unwrap().remove_folder(folder.as_str());
+        urls.remove_folder(folder.as_str());
         let ans = MessageBuilder::new()
             .push("👉Created new ")     .push_mono(folder)
             .push(" directory!")        .build();
@@ -210,14 +265,22 @@ pub async fn rmdir(ctx: &Context, msg: &Message, mut args: Args) -> CommandResul
 
 #[command]
 pub async fn ls(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let (curdir_lock, uf_lock) = {
+        let data_read = ctx.data.read().await;
+        (data_read.get::<CurDir>().expect("Expected CurDir in TypeMap ;(").clone(),
+         data_read.get::<UrlsFolder>().expect("Expected UrlsFilder in TypeMap ;(").clone())
+    };
+
+    let cur_dir = curdir_lock.read().await;
+    let urls = uf_lock.read().await;
     
     let folder = if args.len() > 0 {
        args.single::<String>()?    
     } else {
-        CUR_DIR.lock().unwrap().clone()
+        cur_dir.clone()
     };
 
-    let entries = URLS.lock().unwrap().list_folder(folder.as_str());
+    let entries = urls.list_folder(folder.as_str());
     let mut ans = MessageBuilder::new();
     ans.push("Found following entries in folder ")
        .push_mono(folder)   .push(": \n");
@@ -231,10 +294,16 @@ pub async fn ls(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
 #[command]
 pub async fn save(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
+    let uf_lock = {
+        let data_read = ctx.data.read().await;
+        data_read.get::<UrlsFolder>().expect("Expected UrlsFilder in TypeMap ;(").clone()
+    };
 
-    msg.channel_id.say(&ctx.http, format!("Before: {}", URLS.lock().unwrap()).as_str()).await?;
+    let urls = uf_lock.write().await;
+
+    msg.channel_id.say(&ctx.http, format!("Before: {}", *urls)).await?;
     #[allow(unused_must_use)]
-    match save_raw(DATA_FILE, format!("{}", URLS.lock().unwrap()).as_bytes()) {
+    match save_raw(DATA_FILE, format!("{}", *urls).as_bytes()) {
         Ok(()) => {
             msg.channel_id.say(&ctx.http, "Successfully saved 😘!").await?;
         },
@@ -243,7 +312,7 @@ pub async fn save(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
             ()
         }
     };
-    msg.channel_id.say(&ctx.http, format!("After: {}", URLS.lock().unwrap()).as_str()).await?;
+    msg.channel_id.say(&ctx.http, format!("After: {}", *urls)).await?;
     Ok(())
 }
 

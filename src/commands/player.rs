@@ -1,6 +1,6 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use serenity::{
-    client::Context,
+    prelude::{TypeMapKey, RwLock, Context},
     model::{channel::Message, guild::Guild},
     framework::standard::{
         Args, CommandResult, macros::command
@@ -9,13 +9,16 @@ use serenity::{
 };
 
 use songbird::tracks::TrackHandle;
-use lazy_static::lazy_static;
 
 struct Player {
     handle: Option<TrackHandle>,
     has_joined: bool,
     is_paused: bool,
     queue: Vec<String>
+}
+
+impl TypeMapKey for Player {
+    type Value = Arc<RwLock<Player>>;
 }
 
 impl Player {
@@ -29,10 +32,6 @@ impl Player {
     }
 }
 
-lazy_static! {
-    static ref PLAYER: Arc<Mutex<Player>> = Arc::new(Mutex::new(Player::new()));
-}
-
 #[command]
 pub async fn cache(_ctx: &Context, _msg: &Message) -> CommandResult {
     // msg.channel_id.say(&ctx.http, format!("{:?}", &ctx.cache).as_str()).await?;
@@ -43,7 +42,6 @@ pub async fn cache(_ctx: &Context, _msg: &Message) -> CommandResult {
 #[command]
 #[only_in(guilds)]
 pub async fn join(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
-    let player = PLAYER.lock().expect("could not aquire PLAYER's lock...");
 
     let guild: Guild = msg.guild(&ctx.cache).await.unwrap();
     let guild_id = guild.id;
@@ -62,9 +60,16 @@ pub async fn join(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
 
     let manager = songbird::get(ctx).await
         .expect("Songbird Voice client placed in at initialisation.").clone();
+    
+    let _handler = manager.join(guild_id, connect_to).await;
 
+    let player_lock = {
+        let read_data = ctx.data.read().await;
+        read_data.get::<Player>().expect("Expected Player in TypeMap D-:").clone()
+    };
+    let mut player = player_lock.write().await;
     player.has_joined = true;
-    let _handler = manager.join(guild_id, connect_to);
+
     Ok(())
 }
 
@@ -84,9 +89,16 @@ pub async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
 #[command]
 #[only_in(guilds)]
 pub async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    let player = PLAYER.lock().expect("could not aquire PLAYER's lock...");
-    if !player.has_joined {
-        join(ctx, msg, args).await;
+    let player_lock = {
+        let read_data = ctx.data.read().await;
+        read_data.get::<Player>().expect("Expected Player in TypeMap D-:").clone()
+    };
+    {
+        let player = player_lock.read().await;
+
+        if !player.has_joined {
+            join(ctx, msg, Args::new("", &[])).await?;
+        }
     }
 
     let url = match args.single::<String>() {
@@ -132,10 +144,17 @@ pub async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
             Some(title) => title.clone(),
             None        => String::from("Unknown"),
         };
-        println!("Metadata: ({:?})", &source.metadata);
-        println!("reader: ({:?})", &source.reader);
+        // println!("Metadata: ({:?})", &source.metadata);
+        // println!("reader: ({:?})", &source.reader);
 
-        let track_handle = handler.play_source(source);
+        let player_lock = {
+            let read_data = ctx.data.read().await;
+            read_data.get::<Player>().expect("Expected Player in TypeMap D-:").clone()
+        };
+        {
+            let mut player = player_lock.write().await;
+            player.handle = Some(handler.play_source(source));
+        }
 
         let ans = MessageBuilder::new()
             .push("Playing: ")      .push_underline(&audio_name)
