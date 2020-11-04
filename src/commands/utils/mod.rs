@@ -8,8 +8,8 @@ pub struct FolderSet {
 }
 
 impl FolderSet {
-    pub fn new() -> FolderSet {
-        FolderSet {
+    pub fn new() -> Self {
+        Self {
             folders: HashSet::new(),
             urls: HashMap::new()
         }

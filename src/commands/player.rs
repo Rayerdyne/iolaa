@@ -1,3 +1,4 @@
+use std::sync::{Arc, Mutex};
 use serenity::{
     client::Context,
     model::{channel::Message, guild::Guild},
@@ -7,9 +8,30 @@ use serenity::{
     utils::MessageBuilder,
 };
 
-// use songbird::{
-//     id::GuildId,
-// };
+use songbird::tracks::TrackHandle;
+use lazy_static::lazy_static;
+
+struct Player {
+    handle: Option<TrackHandle>,
+    has_joined: bool,
+    is_paused: bool,
+    queue: Vec<String>
+}
+
+impl Player {
+    fn new() -> Self {
+        Self {
+            handle: None,
+            has_joined: false,
+            is_paused: false,
+            queue: vec![],
+        }
+    }
+}
+
+lazy_static! {
+    static ref PLAYER: Arc<Mutex<Player>> = Arc::new(Mutex::new(Player::new()));
+}
 
 #[command]
 pub async fn cache(_ctx: &Context, _msg: &Message) -> CommandResult {
@@ -21,6 +43,8 @@ pub async fn cache(_ctx: &Context, _msg: &Message) -> CommandResult {
 #[command]
 #[only_in(guilds)]
 pub async fn join(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
+    let player = PLAYER.lock().expect("could not aquire PLAYER's lock...");
+
     let guild: Guild = msg.guild(&ctx.cache).await.unwrap();
     let guild_id = guild.id;
 
@@ -39,8 +63,8 @@ pub async fn join(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
     let manager = songbird::get(ctx).await
         .expect("Songbird Voice client placed in at initialisation.").clone();
 
-    let _handler = manager.join(guild_id, connect_to).await;
-
+    player.has_joined = true;
+    let _handler = manager.join(guild_id, connect_to);
     Ok(())
 }
 
@@ -60,6 +84,11 @@ pub async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
 #[command]
 #[only_in(guilds)]
 pub async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let player = PLAYER.lock().expect("could not aquire PLAYER's lock...");
+    if !player.has_joined {
+        join(ctx, msg, args).await;
+    }
+
     let url = match args.single::<String>() {
         Ok(url) => url,
         Err(_) => {
@@ -106,7 +135,7 @@ pub async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
         println!("Metadata: ({:?})", &source.metadata);
         println!("reader: ({:?})", &source.reader);
 
-        let _track_handle = handler.play_source(source);
+        let track_handle = handler.play_source(source);
 
         let ans = MessageBuilder::new()
             .push("Playing: ")      .push_underline(&audio_name)

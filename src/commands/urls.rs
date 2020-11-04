@@ -9,7 +9,7 @@ use serenity::{
 use std::str::FromStr;
 use std::fs::File;
 use std::io::{Read, Write, Error as IOError, ErrorKind};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use lazy_static::lazy_static;
 
 use super::utils::FolderSet;
@@ -28,12 +28,12 @@ const DATA_FILE: &str = "data/urls.txt";
 // Is `lazy_static` the thing to use or 
 
 lazy_static! {
-    static ref URLS: Mutex<FolderSet> = Mutex::new({
+    static ref URLS: Arc<Mutex<FolderSet>> = Arc::new(Mutex::new({
         match load_urls(DATA_FILE) {
             Ok(fs) => fs,
             Err(_) => FolderSet::new(),
         }
-    });
+    }));
 
     static ref CUR_DIR: Mutex<String> = Mutex::new(String::from(DEF_FOLDER_NAME));
 }
