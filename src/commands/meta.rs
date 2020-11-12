@@ -1,11 +1,32 @@
 use crate::ShardManagerContainer;
-use serenity::prelude::*;
-use serenity::model::prelude::*;
-use serenity::utils::MessageBuilder;
-use serenity::framework::standard::{
-    CommandResult,
-    macros::command,
+
+use serenity::{
+    prelude::Context,
+    model::prelude::Message,
+    utils::MessageBuilder,
+    framework::standard::{
+        CommandResult, // Args,
+        macros::command,
+    }
 };
+
+
+// #[command]
+// #[min_args(1)]
+// #[sub_commands(dog)]
+// pub async fn test(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+//     msg.channel_id.say(&ctx.http, 
+//         format!("Running **test** command with {} args length !", args.len())).await?;
+//     Ok(())
+// }
+
+// #[command]
+// #[aliases(d)]
+// pub async fn dog(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+//     msg.channel_id.say(&ctx.http, 
+//         format!("Running **dog** command with {} woofs !", args.len())).await?;
+//     Ok(())
+// }
 
 #[command]
 async fn ping(ctx: &Context, msg: &Message) -> CommandResult {

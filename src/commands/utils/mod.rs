@@ -3,8 +3,8 @@ use std::fmt;
 use std::str::FromStr;
 
 pub struct FolderSet {
-    folders: HashSet<String>,
-    urls: HashMap<String, String>,
+    pub folders: HashSet<String>,
+    pub urls: HashMap<String, String>,
 }
 
 impl FolderSet {

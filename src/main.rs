@@ -18,7 +18,7 @@ use serenity::{
         event::VoiceServerUpdateEvent, 
         gateway::Ready,
     },
-    prelude::*,
+    prelude::{Mutex, TypeMapKey, Client, Context, EventHandler, RwLock},
 };
 
 use lavalink_rs::{
@@ -144,6 +144,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         data.insert::<VoiceManager>(Arc::clone(&client.voice_manager));
         data.insert::<VoiceGuildUpdate>(Arc::new(RwLock::new(HashSet::new())));
+
+        let fs = load_urls(DATA_FILE_PATH)
+            .expect(&format!("Could not read and parse file {}.", DATA_FILE_PATH));
+        data.insert::<UrlsFolder>(Arc::new(RwLock::new(fs)));
+        data.insert::<CurDir>(Arc::new(RwLock::new(DEF_FOLDER_NAME.to_string())));
 
         let mut lava_client = LavalinkClient::new(bot_id);
 
