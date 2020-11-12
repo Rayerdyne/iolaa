@@ -5,19 +5,25 @@ use std::{
     env,
     sync::Arc,
 };
+
 use serenity::{
     async_trait,
-    client::bridge::gateway::ShardManager,
+    client::bridge::gateway::{ShardManager, GatewayIntents},
     framework::{
         StandardFramework,
         standard::macros::group,
     },
     http::Http,
-    model::{event::ResumedEvent, gateway::Ready},
+    model::{
+        event::VoiceServerUpdateEvent, 
+        gateway::Ready,
+    },
     prelude::*,
 };
 
-use songbird::SerenityInit;
+use lavalink_rs::{
+    LavalinkClient,
+};
 
 use tracing::{error, info};
 use tracing_subscriber::{
@@ -46,9 +52,15 @@ impl EventHandler for Handler {
         info!("Connected as {}", ready.user.name);
     }
 
-    async fn resume(&self, _: Context, _: ResumedEvent) {
-        info!("Resumed");
+    async fn voice_server_update(&self, ctx: Context, voice: VoiceServerUpdateEvent) {
+        if let Some(guild_id) = voice.guild_id {
+            let data = ctx.data.read().await;
+            let voice_server_lock = data.get::<VoiceGuildUpdate>().unwrap();
+            let mut voice_server = voice_server_lock.write().await;
+            voice_server.insert(guild_id);
+        }
     }
+
 }
 
 #[group]
@@ -64,11 +76,11 @@ struct Math;
 struct UrlSet;
 
 #[group]
-#[commands(join, leave, cache, play, stop)]
+#[commands(join, leave, play, stop)]
 struct Player;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // This will load the environment variables located at `./.env`, relative to
     // the CWD. See `./.env.example` for an example on how to structure this.
     dotenv::dotenv().expect("Failed to load .env file");
@@ -90,15 +102,17 @@ async fn main() {
     let http = Http::new_with_token(&token);
 
     // We will fetch your bot's owners and id
-    let (owners, _bot_id) = match http.get_current_application_info().await {
+    let (owners, bot_id) = match http.get_current_application_info().await {
         Ok(info) => {
             let mut owners = HashSet::new();
             owners.insert(info.owner.id);
+            println!("Info: {:?}", info);
 
             (owners, info.id)
         },
         Err(why) => panic!("Could not access application info: {:?}", why),
     };
+
 
     // Create the framework
     let framework = StandardFramework::new()
@@ -113,13 +127,31 @@ async fn main() {
     let mut client = Client::builder(&token)
         .framework(framework)
         .event_handler(Handler)
-        .register_songbird()
+        // .intents(GatewayIntents::all())
+        .intents(   GatewayIntents::DIRECT_MESSAGES
+                  | GatewayIntents::GUILDS 
+                  | GatewayIntents::GUILD_MESSAGES
+                  | GatewayIntents::GUILD_EMOJIS
+                  | GatewayIntents::GUILD_PRESENCES
+                  | GatewayIntents::GUILD_VOICE_STATES
+                  | GatewayIntents::GUILD_MESSAGE_REACTIONS)
         .await
         .expect("Err creating client");
-
+    
     {
         let mut data = client.data.write().await;
         data.insert::<ShardManagerContainer>(client.shard_manager.clone());
+
+        data.insert::<VoiceManager>(Arc::clone(&client.voice_manager));
+        data.insert::<VoiceGuildUpdate>(Arc::new(RwLock::new(HashSet::new())));
+
+        let mut lava_client = LavalinkClient::new(bot_id);
+
+        lava_client.set_host("127.0.0.1");
+
+        let lava = lava_client.initialize(LavalinkHandler).await?;
+        data.insert::<Lavalink>(lava);
+
     }
 
     let shard_manager = client.shard_manager.clone();
@@ -132,4 +164,6 @@ async fn main() {
     if let Err(why) = client.start().await {
         error!("Client error: {:?}", why);
     }
+
+    Ok(())
 }

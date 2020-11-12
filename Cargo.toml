@@ -18,17 +18,28 @@ version = "0.2"
 features = ["macros", "signal"]
 
 [dependencies.serenity]
-git = "https://github.com/serenity-rs/serenity"
-rev = "fd6f08b7ca8239cd4c17865b023cb06867c1ff98"
-# branch = "next"
-# version = "0.9"
+version = "0.9.0-rc.4"
 default-features = false
-features = ["client", "cache", "standard_framework", "voice", "native_tls_backend"]
-# features = ["framework", "standard_framework"]
+features = ["client", "gateway", "model", "voice", "cache", "standard_framework", "native_tls_backend"]
 
-[dependencies.songbird]
-git = "https://github.com/serenity-rs/serenity"
-rev = "fd6f08b7ca8239cd4c17865b023cb06867c1ff98"
-# branch = "next"
+[dependencies.lavalink-rs]
+git = "https://gitlab.com/nitsuga5124/lavalink-rs/"
+branch = "master"
+
+
+# previously: 
+# [dependencies.serenity]
+# git = "https://github.com/serenity-rs/serenity"
+# rev = "fd6f08b7ca8239cd4c17865b023cb06867c1ff98"
+# # branch = "next"
+# # version = "0.9"
 # default-features = false
-# features = ["serenity-native", "gateway"]
+# features = ["client", "cache", "standard_framework", "voice", "native_tls_backend"]
+# # features = ["framework", "standard_framework"]
+
+# [dependencies.songbird]
+# git = "https://github.com/serenity-rs/serenity"
+# rev = "fd6f08b7ca8239cd4c17865b023cb06867c1ff98"
+# # branch = "next"
+# # default-features = false
+# # features = ["serenity-native", "gateway"]
